@@ -100,11 +100,13 @@ $("go").onclick = async () => {
   room.registerTextStreamHandler?.("lk.chat", async (reader, info) => addChat(room.getParticipantByIdentity?.(info.identity)?.name || "Estudio", await reader.readAll()));
   try {
     await room.connect(url, token);
-    await room.localParticipant.setMicrophoneEnabled(true);
-    await room.localParticipant.setCameraEnabled(true, { facingMode: facing, resolution: LK.VideoPresets.h720.resolution });
+    // Sin cámara o sin micrófono también se puede entrar (para ver y escuchar al estudio).
+    try { await room.localParticipant.setMicrophoneEnabled(true); } catch (e) { $("mic").classList.add("off"); }
+    try { await room.localParticipant.setCameraEnabled(true, { facingMode: facing, resolution: LK.VideoPresets.h720.resolution }); }
+    catch (e) { $("cam").classList.add("off"); $("self").style.display = "none"; }
     const cam = room.localParticipant.getTrackPublication(LK.Track.Source.Camera)?.track;
-    if (cam) cam.attach($("self"));
-    await room.startAudio();
+    if (cam) cam.attach($("self")); else $("self").style.display = "none";
+    try { await room.startAudio(); } catch (e) {}
     show("call");
   } catch (e) {
     $("msg").textContent = "No se pudo entrar: " + (e.message || e) + ". Revisa la conexión o pide un enlace nuevo.";
