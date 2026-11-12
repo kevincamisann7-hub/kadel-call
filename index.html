@@ -71,7 +71,7 @@ const show = id => document.querySelectorAll(".screen").forEach(s => s.classList
 let room, facing = "user", previewStream;
 
 // Nombre del invitado: va dentro del enlace.
-try { const p = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); if (p.name) $("name").textContent = p.name; } catch (e) {}
+try { const raw = atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")); const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, c => c.charCodeAt(0)))); if (p.name) $("name").textContent = p.name; } catch (e) {}
 if (!url || !token) { $("go").disabled = true; $("msg").textContent = "Este enlace no es válido. Pide al estudio que te lo envíe otra vez."; }
 
 async function startPreview() {
