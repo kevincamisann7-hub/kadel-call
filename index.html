@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kadel Call</title>
+<style>
+:root{--bg:#0d1016;--panel:#171b23;--line:#2a303c;--text:#eef1f6;--muted:#9aa3b2;--green:#2fbf5b;--red:#e5484d;--blue:#3b82f6}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit;border:0;cursor:pointer}
+.screen{display:none;height:100%;flex-direction:column}.screen.on{display:flex}
+#join{align-items:center;justify-content:center;padding:24px;gap:18px;text-align:center}
+.logo{font-size:30px;font-weight:800;letter-spacing:.5px}.logo b{color:var(--green)}
+#preview{width:min(420px,90vw);aspect-ratio:16/9;background:#000;border-radius:10px;object-fit:cover;transform:scaleX(-1)}
+.who{color:var(--muted)}.who strong{color:var(--text)}
+.big{background:var(--green);padding:14px 34px;border-radius:10px;font-weight:700;font-size:18px}
+.big:disabled{opacity:.5}
+#msg{color:#f5a524;min-height:1.4em;max-width:420px}
+#call{position:relative;background:#000}
+#stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+#stage video{width:100%;height:100%;object-fit:contain;background:#000}
+#waiting{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:24px}
+#self{position:absolute;right:12px;top:calc(12px + env(safe-area-inset-top));width:26vw;max-width:180px;aspect-ratio:3/4;object-fit:cover;border-radius:8px;border:2px solid var(--blue);background:#111;transform:scaleX(-1);z-index:2}
+#bar{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:12px;padding:14px 12px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.75));z-index:3}
+.ctl{width:58px;height:58px;border-radius:50%;background:rgba(40,46,58,.92);font-size:24px;display:flex;align-items:center;justify-content:center}
+.ctl.off{background:var(--red)}.ctl.hang{background:var(--red)}
+#status{position:absolute;left:12px;top:calc(12px + env(safe-area-inset-top));background:rgba(0,0,0,.6);padding:4px 10px;border-radius:6px;font-size:13px;z-index:2}
+#status i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px}
+#chat{position:absolute;left:0;right:0;bottom:0;height:55%;background:var(--panel);border-top:1px solid var(--line);z-index:4;display:none;flex-direction:column}
+#chat.on{display:flex}#log{flex:1;overflow:auto;padding:12px}#log p{margin:0 0 8px}#log b{color:var(--green)}
+#chat form{display:flex;gap:8px;padding:10px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) 10px}
+#chat input{flex:1;background:#0f131a;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:inherit}
+#chat button{background:var(--blue);padding:0 16px;border-radius:8px}
+#badge{position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:var(--red);display:none}
+#end{align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+</style>
+</head>
+<body>
+<section id="join" class="screen on">
+  <div class="logo">Kadel <b>Call</b></div>
+  <video id="preview" autoplay playsinline muted></video>
+  <div class="who">Entrarás como <strong id="name">invitado</strong></div>
+  <button id="go" class="big">Unirse a la llamada</button>
+  <div id="msg"></div>
+</section>
+<section id="call" class="screen">
+  <div id="stage"><div id="waiting">Conectado. Esperando la señal del estudio…</div></div>
+  <video id="self" autoplay playsinline muted></video>
+  <div id="status"><i></i>En vivo con el estudio</div>
+  <div id="bar">
+    <button class="ctl" id="mic" title="Micrófono">🎙️</button>
+    <button class="ctl" id="cam" title="Cámara">📷</button>
+    <button class="ctl" id="flip" title="Cambiar cámara">🔄</button>
+    <button class="ctl" id="talk" title="Chat" style="position:relative">💬<span id="badge"></span></button>
+    <button class="ctl hang" id="hang" title="Salir">📞</button>
+  </div>
+  <div id="chat"><div id="log"></div><form id="send"><input id="text" placeholder="Escribe al estudio…" autocomplete="off"><button>Enviar</button></form></div>
+</section>
+<section id="end" class="screen">
+  <div class="logo">Kadel <b>Call</b></div>
+  <p>Saliste de la llamada.</p>
+  <button class="big" onclick="location.reload()">Volver a entrar</button>
+</section>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.15.6/dist/livekit-client.umd.js"></script>
+<script>
+const LK = window.LivekitClient;
+const q = new URLSearchParams(location.search);
+const url = q.get("liveKitUrl"), token = q.get("token");
+const $ = id => document.getElementById(id);
+const show = id => document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
+let room, facing = "user", previewStream;
+
+// Nombre del invitado: va dentro del enlace.
+try { const p = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); if (p.name) $("name").textContent = p.name; } catch (e) {}
+if (!url || !token) { $("go").disabled = true; $("msg").textContent = "Este enlace no es válido. Pide al estudio que te lo envíe otra vez."; }
+
+async function startPreview() {
+  try {
+    previewStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: 1280, height: 720 }, audio: true });
+    $("preview").srcObject = previewStream;
+  } catch (e) { $("msg").textContent = "Permite el acceso a la cámara y al micrófono para entrar."; }
+}
+if (url && token) startPreview();
+
+$("go").onclick = async () => {
+  $("go").disabled = true; $("msg").textContent = "Conectando…";
+  previewStream?.getTracks().forEach(t => t.stop());
+  room = new LK.Room({ adaptiveStream: false, dynacast: true,
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    videoCaptureDefaults: { resolution: LK.VideoPresets.h720.resolution, facingMode: facing } });
+  room.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+    if (!participant.identity.startsWith("kadel-")) return;   // solo el retorno del estudio
+    if (track.kind === "video") { $("waiting").style.display = "none"; const v = track.attach(); v.playsInline = true; $("stage").querySelectorAll("video").forEach(x => x.remove()); $("stage").appendChild(v); }
+    if (track.kind === "audio") { const a = track.attach(); document.body.appendChild(a); }
+  });
+  room.on(LK.RoomEvent.TrackUnsubscribed, (track) => { track.detach().forEach(el => el.remove()); if (track.kind === "video") $("waiting").style.display = "flex"; });
+  room.on(LK.RoomEvent.Disconnected, () => show("end"));
+  room.on(LK.RoomEvent.Reconnecting, () => $("status").innerHTML = "<i style='background:#f5a524'></i>Reconectando…");
+  room.on(LK.RoomEvent.Reconnected, () => $("status").innerHTML = "<i></i>En vivo con el estudio");
+  room.registerTextStreamHandler?.("lk.chat", async (reader, info) => addChat(room.getParticipantByIdentity?.(info.identity)?.name || "Estudio", await reader.readAll()));
+  try {
+    await room.connect(url, token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    await room.localParticipant.setCameraEnabled(true, { facingMode: facing, resolution: LK.VideoPresets.h720.resolution });
+    const cam = room.localParticipant.getTrackPublication(LK.Track.Source.Camera)?.track;
+    if (cam) cam.attach($("self"));
+    await room.startAudio();
+    show("call");
+  } catch (e) {
+    $("msg").textContent = "No se pudo entrar: " + (e.message || e) + ". Revisa la conexión o pide un enlace nuevo.";
+    $("go").disabled = false;
+  }
+};
+
+$("mic").onclick = async () => { const on = !room.localParticipant.isMicrophoneEnabled; await room.localParticipant.setMicrophoneEnabled(on); $("mic").classList.toggle("off", !on); };
+$("cam").onclick = async () => { const on = !room.localParticipant.isCameraEnabled; await room.localParticipant.setCameraEnabled(on); $("cam").classList.toggle("off", !on); $("self").style.display = on ? "" : "none"; };
+$("flip").onclick = async () => {
+  facing = facing === "user" ? "environment" : "user";
+  const cam = room.localParticipant.getTrackPublication(LK.Track.Source.Camera)?.track;
+  if (cam) { await cam.restartTrack({ facingMode: facing }); $("self").style.transform = facing === "user" ? "scaleX(-1)" : "none"; }
+};
+$("hang").onclick = () => room.disconnect();
+$("talk").onclick = () => { $("chat").classList.toggle("on"); $("badge").style.display = "none"; if ($("chat").classList.contains("on")) $("text").focus(); };
+$("send").onsubmit = async (e) => {
+  e.preventDefault(); const t = $("text").value.trim(); if (!t) return;
+  $("text").value = ""; addChat("Tú", t, true);
+  try { await room.localParticipant.sendText(t, { topic: "lk.chat" }); } catch (err) {}
+};
+function addChat(from, text, mine) {
+  const p = document.createElement("p"); const b = document.createElement("b"); b.textContent = from + ": ";
+  p.appendChild(b); p.appendChild(document.createTextNode(text)); $("log").appendChild(p); $("log").scrollTop = 1e9;
+  if (!mine && !$("chat").classList.contains("on")) $("badge").style.display = "block";
+}
+</script>
+</body>
+</html>
